@@ -1,0 +1,37 @@
+---
+title: "Interesting R Examples"
+author: "Kaan Bilgin  - IE582 - Fall 2020"
+---
+```{r,echo=FALSE,results="hide"}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+1. [Exploring Survival on the Titanic](https://www.kaggle.com/mrisdal/exploring-survival-on-the-titanic)
+
+    Despite fact that this example was the example project on the homework file I, too, believe that this is an interesting project which has a lot of features like; preprocess of the data, feature engineering, missing data exploration, how to fill a missing data (with options) etc. while maintaining to visualize each step (which is to me the best part of the project since has the direct outputs of the project) with minor changes in data set. 
+
+2. [Exploratory Analysis Instacart](https://www.kaggle.com/philippsp/exploratory-analysis-instacart)
+
+    E-commerce retailing industry has reached trillions dollar of worth and companies in this sector (especially Amazon INC.), Emphasizing data mining on product sales to increase their sale number. I always wondered how the exploratory data analsis coding works and how the companies get insights from the analysis. This project uses and handles 3.4 million grocery order in 6 csv files while explaining each step with again, visualized data.
+
+3. [Suicide Data Full Interactive Dashboard](https://www.kaggle.com/tavoosi/suicide-data-full-interactive-dashboard)
+
+    Like the first example, main reason I choosed this project was the sheer simplicity in it's graphs about how data visualized. I say sheer simplicity because if you would open the link, you would see that there is no explaining text but the project is still very clear about it's content and the visualized data. 
+
+4. [Be My Guest Recruit Restaurant EDA](https://www.kaggle.com/headsortails/be-my-guest-recruit-restaurant-eda#introduction)
+
+    This example is the hardest one for me by far because of it's libraries, functions, file structure, content etc. but also the most informative one because while other selected projects mainly focus on the analysis, this project includes a challenge to predict the future numbers of restaurant visitors, dealing with time series forcasting. Data collected through two japanese websites. The project dealt with number of indices like impact of the days of the week, holidays, cuisine type, reservation vs visits, weather etc. and also ARIMA method (Autoregressive integrated moving average) usage has shown for the forecasting engineering part.
+
+5. [Analyzing Star Wars Movie Scripts](https://www.kaggle.com/xvivancos/analyzing-star-wars-movie-scripts)
+
+    My final interesting project for this assignment will be the text mining of Star Wars movies (original 1977 trilogy) simply because I was obsessed with Star Wars when I was a kid and seeing the wordcloud (like our first twitter example in our very first class) usage for data visualization with clear syntax of codes, reinforced my understanding heavily.
+
+
+
+
+
+
+
+
+    Press [here](https://bu-ie-582.github.io/fall20-kaanblgn/) to return to homepage.

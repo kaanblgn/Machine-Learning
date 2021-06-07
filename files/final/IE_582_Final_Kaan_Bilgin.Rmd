@@ -1,0 +1,258 @@
+---
+title: "IE 582 Final - Kaan Bilgin"
+author: "Kaan Bilgin"
+date: "2/6/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+<style type="text/css">
+  body{
+  font-size: 14pt;
+}
+</style>
+
+```{r setup, include=FALSE, warning=FALSE, error=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Summary**
+
+This is IE582 final exam for Kaan Bilgin. This report includes:
+
+* Brief information about Multi-instance Learning (MIL)
+* Data Set Link 
+* MIL approaches: KNN, Hierarchical Clustering, MIL Logistic Regression with Lasso Penalty (milr package) and softmax
+* KNN AUC = 77.2%, H-clustering Accuracy 97.32%(maximum), Milr and Softmax for 10-fold Accuracy = 100% (Does not working properly) 
+* Discussion
+
+
+# **1.Introduction**
+
+In machine learning, multi-instance learning (MIL) is a variant of supervised learning. Instead of getting a series of individually labeled instances, the learner should receives a set of labeled bags, each containing multiple instances. In the simple case of a binary classification with multiple instances, a bag can be marked as negative if all the instances it contains are negative. Sure On the other hand, a bag is marked as positive if there is at least one instance in it that is positive. Of With a collection of labeled bags, the learner either tries (i) to develop a concept that labels the person
+Instances correctly or (ii) learn to label the bags without inducing the concept.
+
+In this final report, Multi-instance learning (MIL) is done for [MUSK1](https://archive.ics.uci.edu/ml/datasets/Musk+(Version+1)) data. You may access the data from the link. 
+
+The goal is come up with a two alternative bag-level represtations for the given dataset and problem. Problem is whether to predict that new molecules will be musk or non-musk, and what makes this problem a MIL problem is that since bonds can rotate, a single molecule can adopt different shapes more than 1. 
+
+
+We will start with importing libraries and splitting the given data.
+
+# **2.Libraries**
+```{r libraries, warning=FALSE, error=FALSE, message=FALSE}
+
+library(milr)
+library(data.table)
+library(magrittr)
+library(dplyr)
+library(pipeR)
+library(class)
+library(caret)
+library(mlbench)
+library(tidyverse)  
+library(cluster)   
+library(factoextra) 
+library(dendextend) 
+
+```
+
+Imported data normalized to handle better and splitted into train and test data.
+
+# **3.Data Import, Handling and Splitting**
+```{r data read, warning=FALSE, error=FALSE, message=FALSE}
+
+# reading data
+data = read.table("Musk1.csv", sep = ",")
+
+# backup file
+data2 <- data
+
+# custom normalization function
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+
+# applying normalization
+data2.n <- as.data.frame(lapply(data2[,2:168], normalize))
+
+## 75% of the sample size
+data_size <- floor((2/3) * nrow(data2.n))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+
+# splitting the data as train and test set
+data_train_ind <- sample(seq_len(nrow(data2.n)), size = data_size)
+
+train_data <- data2[data_train_ind, ]
+test_data  <- data2[-data_train_ind, ]
+
+train.data_labels <- data2[data_train_ind, 1]
+test.data_labels  <- data2[-data_train_ind,1]
+
+```
+
+# **4.Approaches**
+
+Due do the very nature of this problem, at the start I thought that maybe the distances may be involved and easy the problem for me. After some search I found this paper from [Multiple-Instance Learning with Instance Selection via
+Dominant Sets Aykut Erdem](https://web.cs.hacettepe.edu.tr/~aykut/papers/milds.pdf) and many also that 
+include in their paper the KNN as a solver for this type of problems (MIL). So I started with KNN and after getting meaningful result.
+
+## **4.1.KNN**
+
+I modeled and optimized a KNN for k value to come up with a better fit. Usually I saw that the using square root of the data size is the k-go parameter but I wanted to obtain the best, so I coded a loop.
+
+### **4.1.1.Model Training and Parameter Tuning**
+```{r knn training and prediction, warning=FALSE, error=FALSE, message=FALSE}
+
+# training the optimum outcome KNN
+i = 1
+k.optm = 1
+
+
+for (i in 1:23){
+    
+    knn.mod <- knn(train = train_data, test = test_data, cl = train.data_labels, k = i, prob = TRUE)
+    
+    k.optm[i] <- 100 * sum(test.data_labels == knn.mod)/NROW(test.data_labels)
+  
+    k=i
+  
+    cat(k,'=',k.optm[i],'')}
+
+max_k <- max(k.optm[])
+
+print(max_k)
+
+
+```
+I plot the obtained accuracy results before AUC.
+
+### **4.1.2.KNN Results**
+```{r optimum knn, warning=FALSE, error=FALSE, message=FALSE}
+
+# optimum
+
+plot(k.optm, type="b", xlab="K- Value", ylab="Accuracy level")
+
+```
+Best fit is happened at K = 3 with 89%, after that I plotted the AUC
+
+### **4.1.3.AUC**
+```{r knn auc, warning=FALSE, error=FALSE, message=FALSE}
+
+# area under curve plot
+attributes(knn.mod)$prob
+
+library(pROC)
+
+roc(test_data$V1, attributes(knn.mod)$prob)
+
+plot(roc(test_data$V1, attributes(knn.mod)$prob),
+     print.thres = T,
+     print.auc = T)
+
+
+```
+Overall, a good curve. Adequate.
+
+## **4.2.Hierarchical Clustering**
+
+After some comment on discussion board and doing KNN, I wanted to see if clustering works for this problem, so I searched and found this paper [Multi-instance clustering with applications to multi-instance prediction, Min-Ling Zhang, Zhi-Hua Zhou](https://www.researchgate.net/publication/220204694_Multi-instance_clustering_with_applications_to_multi-instance_prediction) where they apply multi instance clustering at multi instance problems. I wanted to apply hierarchical clustering to obtain a good fit since this also deals with dissimilarities like distance handling at KNN.
+
+### **4.2.1.Agglomerative Hierarchical Clustering, HCLust**
+```{r hierarchical clustering, warning=FALSE, error=FALSE, message=FALSE}
+
+# dissimilarity calculating
+distance <- dist(data2.n, method = "euclidean")
+
+# hierarchical clustering 
+hc1 <- hclust(distance, method = "complete")
+
+# dendogram plotting
+plot(hc1, cex = 0.6, hang = -1, main = "Dendrogram of hclust")
+
+```
+
+### **4.2.2.Agglomerative Hierarchical Clustering, Agnes**
+```{r agnes distance, warning=FALSE, error=FALSE, message=FALSE}
+
+# dissimilarity calculating
+hc2 <- agnes(distance, method = "complete")
+
+# accuracy
+hc2$ac
+
+# tree plotting
+pltree(hc2, cex = 0.6, hang = -1, main = "Dendrogram of agnes") 
+
+```
+### **4.2.3. Cluster Methods Results Comparison**
+```{r cluster methods comparison, warning=FALSE, error=FALSE, message=FALSE}
+
+# comparison models
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+
+# accuracy calculation
+ac <- function(x) {
+  agnes(distance, method = x)$ac
+}
+
+# accuracy comparison
+map_dbl(m, ac)
+
+```
+Overall for 4 methods, they gave adequate result but ward made an excellent job with 97% accuracy, but it might be overfitted probably.
+
+```{r best performance}
+
+# extracting and plotting the best performing method
+hc3 <- agnes(distance, method = "ward")
+
+# plotting tree
+pltree(hc3, cex = 0.6, hang = -1, main = "Dendrogram of agnes") 
+
+```
+Finally I found some MIL Logistic Regression with Lasso Penalty package called milr for an additional method. It also meaningful as the selected important covariates in the regression model, maximum likelihood estimation with an expectation maximized algorithm is implemented for model estimation, and a lasso penalty added to the likelihood function is applied for variable selection.
+ 
+## **4.3.Milr-LASSO and Softmax**
+```{r milr and softmax, warning=FALSE, error=FALSE, message=FALSE}
+
+# seeding
+set.seed(99)
+
+# data backup
+data3.n <- data2
+
+# data normalization
+data3.n <- as.data.frame(lapply(data2[,1:168], normalize))
+
+# design matrix
+X <- paste0("V", 1:(ncol(data3.n) - 2), collapse = "+") %>>% 
+  (paste("~", .)) %>>% as.formula %>>% model.matrix(data3.n) %>>% `[`( , -1L)
+
+# target values
+Y <- as.numeric(with(data3.n, tapply(V1, V2, function(x) sum(x) > 0)))
+
+# MILR-LASSO
+milrSV <- milr(data3.n$V1, X, data3.n$V2, lambda = -1, numLambda = 20, 
+               nfold = 10, lambdaCriterion = "deviance", maxit = 1000)
+
+# Softmax
+softmaxFit_0 <- softmax(data3.n$V1, X, data3.n$V2, alpha = 0, 
+                        control = list(maxit = 5000))
+
+# Confusion table for Milr-LASSO
+table(DATA = Y, FIT_MILR = fitted(milrSV, type = "bag"))
+
+# Confusion table for Softmax
+table(DATA = Y, FIT_Softmax = fitted(milrSV, type = "bag"))
+
+```
+# **5.Discussion**
+
+* KNN and Hierarchical clustering methods gave reasonable outputs, moreover with nice auc and accuracy values and they showed that similarity and distance might always be a good idea for this type of problems, but milr package suffered with overfitting as the confusion matrix shows that the model predicted every bag level representation correct. It clearly suffers from overfitting or I messed up with input variables which also is a possible answer for this problem.

@@ -1,0 +1,1437 @@
+---
+title: "**Data Mining on Four Sets of Data with Lasso Regression, Tree Based Approaches and SGB**"
+author: "Kaan Bilgin"
+date: "31/1/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+# **1.Introduction**
+
+In this report:
+
+* Four data set with different attributes and features analyzed,
+* Lasso Regression, Tree based approaches (CART and Random Forest) and Stochastic Gradient Boost approaches are applied,
+* cv.glmnet for regression, rpart and caret for decision trees and at last xgboost for SGB used,
+* Accuracy varies between %86 to %100 for different sets,
+* Data source, code implementation, results and discussion reported with one data set report at a time through a aggregated report,
+* Brief comparison done between approaches at the end of report.
+* Same models for same methods with slightly modifications used over and over in the report and because of this, first two report will be very highly informative comparison to 2nd, 3rd and the 4th report (only the modifications will be highlighted in these reports)
+* F1 metric used for evaluating classification problems where MAPE used for the regression data set.
+
+---
+
+# **2.Datasets**
+
+**[Spambase Data Set](https://archive.ics.uci.edu/ml/datasets/spambase)**
+
+* The "spam" concept is diverse: advertisements for products/web sites, make money fast schemes, chain letters etc. This dataset of includes spam mails and normal private mails data to come up with a filter for spam or not detection hence, spam or not classification.
+
+  * Data Set Characteristics: Multivariate
+  * Number of Instances: 4601
+  * Attribute Characteristics: Integer, Real
+  * Number of Attributes: 57
+  * Associated Tasks: Binary Classification (Spam or Not)
+  * Missing Values: Yes
+  * Class Imbalance: Yes
+
+**[Mice Protein Expression Data Set](https://archive.ics.uci.edu/ml/datasets/Mice+Protein+Expression)**
+
+* Expression levels of 77 proteins measured in the cerebral cortex of 8 classes of control and Down syndrome mice exposed to context fear conditioning, a task used to assess associative learning.
+
+  * Data Set Characteristics: Multivariate
+  * Number of Instances: 1080
+  * Attribute Characteristics: Real
+  * Number of Attributes: 82
+  * Associated Tasks: Multi-Class Classification
+  * Missing Values: Yes
+  * Classes: c-CS-s, c-CS-m, c-SC-s, c-SC-m, t-CS-s, t-CS-m, t-SC-s, t-SC-m
+
+**[Parkinson Speech Dataset with Multiple Types of Sound Recordings Data Set](https://archive.ics.uci.edu/ml/datasets/Parkinson+Speech+Dataset+with++Multiple+Types+of+Sound+Recordings)**
+
+* The training data belongs to 20 Parkinson's Disease (PD) patients and 20 healthy subjects. From all subjects, multiple types of sound recordings (26) are taken. UPDRS (Unified ParkinsonS' Disease Rating Scale) score of each patient which is determined by expert physician is also available in this dataset.
+
+  * Data Set Characteristics: Multivariate
+  * Number of Instances: 1040
+  * Attribute Characteristics: Integer, Real
+  * Number of Attributes: 26
+  * Associated Tasks: Regression (UPDRS point)
+  * Missing Values: Yes
+
+**[Student Performance Data Set](https://archive.ics.uci.edu/ml/datasets/Student+Performance)**
+
+* This data approach student achievement in secondary education of two Portuguese schools. The data attributes include student grades, demographic, social and school related features) and it was collected by using school reports and questionnaires.
+
+  * Data Set Characteristics: Multivariate
+  * Number of Instances: 649
+  * Attribute Characteristics: Integer
+  * Number of Attributes: 33
+  * Associated Tasks: Binary Classification (Pass - Fail)
+  * Missing Values: Yes
+  * Class Imbalance: Yes
+
+---
+
+Report will go through the path mentioned in introduction with again above dataset order:
+
+  * Import data
+  * Clean data
+  * Specify train and data sets
+  * Create a model
+  * Optimize the model
+  * Train 
+  * Test
+  * Accuracy metrics
+  
+All codes are trained and tested numerously by hand before knitting, not by code. So you can see only the optimized values. 
+  
+---
+```{r spam setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **3.Spambase Data Set**
+
+## 3.1.Libraries
+
+Implementation starting with library uploading. There are two more libraries coming after these libraries. I separated them because rstudio gave warnings about them masking knitting features.
+
+```{r spam lib,message=FALSE, error=FALSE}
+
+library(caTools)
+library(randomForest)
+library(ROCR)
+library(tidyverse)
+library(data.table)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(mlbench)
+library(MLmetrics)
+library(dplyr)
+library(caret)
+library(readr)
+library(e1071)
+
+
+```
+
+## 3.2.Data Import
+
+Data importing through working directory. Knit directory also changed to current working directory to handle an error in Rstudio, there are more bugs like this in report, I did debug all and all codes are working in my computer so if any error occurs, please contact me.
+
+```{r spam data,message=FALSE, error=FALSE}
+
+# reading data and some peaking through to know what we are dealing with
+spambase_data <- read.table("spambase.data", sep = ",", header = TRUE)
+
+summary(spambase_data)
+
+# creating a backup dataset for usage purposes, after cleaning instances with missing values for better prediction 
+
+spambase_data2 <- na.omit(spambase_data)
+
+
+```
+## 3.3.Tree Based Approahces
+
+### 3.3.1. Decision Tree
+
+Since the problem in it's core is a binary classification problem, classification tree will be created. For this one and all other reports, Train and Data sets divided from a single data file as 2/3 = train and 1/3 = test. 
+
+* Seed, helps to recreate obtained results on a different run.
+* Sample, helps to shuffle the rows
+* rpart used for model creation with misplit 1 and cp = 0.0001
+
+```{r spam decision tree,message=FALSE, error=FALSE}
+# Classification Tree with rpart
+
+## 75% of the sample size
+spambase_smp_size <- floor((2/3) * nrow(spambase_data2))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+
+spambase_train_ind <- sample(seq_len(nrow(spambase_data2)), size = spambase_smp_size)
+
+spambase_dt_training_data <- spambase_data2[spambase_train_ind, ]
+spambase_dt_test_data     <- spambase_data2[-spambase_train_ind, ]
+
+
+spambase_dt_model <- rpart(X1 ~ ., 
+                           data = spambase_dt_training_data, 
+                           method="class",
+                           control = rpart.control(minsplit= 1, cp = 0.0001))
+
+
+#Plot Decision Tree
+rpart.plot(spambase_dt_model)
+
+# Examine the complexity plot
+printcp(spambase_dt_model)
+plotcp(spambase_dt_model)
+
+```
+I grew the tree until the end as you can see in the x-val relative error - cp curve, aka learning curve. It shows a nice converging curve that indicates model is learning. Next step is to optimize the training model for to get maximum accuracy in testing phase. 
+
+* From learning curve, cp value changed to 0.0019. 
+* confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r spam predict,message=FALSE, error=FALSE}
+
+spambase_dt_model_opt <- rpart(X1 ~ ., 
+                               data = spambase_dt_training_data, 
+                               method="class",
+                               control = rpart.control(minsplit= 1, cp = 0.0019))
+
+spambase_dt_prediction <- predict(spambase_dt_model_opt, spambase_dt_test_data, type = "class")
+spambase_dt_train_pred <- predict(spambase_dt_model_opt, spambase_dt_training_data, type = "class")
+
+spambase_table_mat <- table(spambase_dt_test_data$X1, spambase_dt_prediction)
+spambase_train_table_mat <- table(spambase_dt_training_data$X1, spambase_dt_train_pred)
+
+spambase_dt_conf_mat <- confusionMatrix(factor(spambase_dt_prediction), factor(spambase_dt_test_data$X1))
+spambase_dt_train_conf_mat <- confusionMatrix(factor(spambase_dt_train_pred), factor(spambase_dt_training_data$X1))
+
+
+spambase_dt_prediction <- as.numeric(spambase_dt_prediction)
+spambase_dt_train_pred <- as.numeric(spambase_dt_train_pred)
+
+data.frame( R2   = R2(spambase_dt_prediction, spambase_dt_test_data$X1),
+            RMSE = RMSE(spambase_dt_prediction, spambase_dt_test_data$X1),
+            MAE  = MAE(spambase_dt_prediction, spambase_dt_test_data$X1),
+            Train_Accuracy = sum(diag(spambase_train_table_mat)) / sum(spambase_train_table_mat),
+            Test_Accuracy = sum(diag(spambase_table_mat)) / sum(spambase_table_mat))
+
+
+print(spambase_dt_train_conf_mat[["table"]])
+print(spambase_dt_conf_mat[["table"]])
+
+varImp(spambase_dt_model_opt)
+
+```
+As it can be seen on the metrics, our model underfit as train accuracy outscores testing accuracy by %3 but in overall %92 is a high test accuracy.
+
+---
+
+### 3.3.2.Random Forest
+
+As the name indicates, this appraoch is combined from several decision trees, like a "forest". In theory, it is more suitable for nonlinear cases since more single trees might converge to more likely estimation for those scenarios.
+
+* randomForest function used for modelling purposes with ntree = 500 and number = 10 as indicated in the report, more info can be seen on the printed OOB estimate of error rate.
+
+```{r spam random forest, message=FALSE, error=FALSE}
+
+#Random Forest Approach
+
+spambase_rf_training_data <- spambase_dt_training_data
+spambase_rf_test_data <- spambase_dt_test_data
+
+
+spambase_rf_training_data$X1 <- as.factor(spambase_rf_training_data$X1)
+spambase_rf_test_data$X1 <- as.factor(spambase_rf_test_data$X1)
+
+
+#RF Implement
+#control <- trainControl(method = "cv", number = 20, search ="grid")
+
+spambase_rf_model <- randomForest(X1~.,
+                                  data = spambase_rf_training_data,
+                                  ntree = 500,
+                                  search = "grid",
+                                  number = 10)
+
+
+# Print the results
+print(spambase_rf_model)
+
+
+```
+OOB estimate of error rate is meaning that model is learning very nice in terms of accuracy, but before testing, model optimizing comes.
+
+* tuneRF used for tuning the random forest model.
+* Models tried for obtaining the optimized results.
+* Optimum parameters used with must used parameters (ntreetry = 50 and number 10).
+
+```{r spam rf mtry,message=FALSE, error=FALSE}
+
+spambase_rf_training_data_sub <- subset(spambase_rf_training_data, select = -c(X1))
+
+floor(sqrt(ncol(spambase_rf_training_data) - 1))
+
+spambase_mtry <- tuneRF(spambase_rf_training_data_sub,
+                        spambase_rf_training_data$X1, 
+                        ntreeTry = 500,
+                        stepFactor = 2,
+                        improve = 0.1,
+                        trace = TRUE,
+                        plot = TRUE,
+                        importance = TRUE)
+
+spambase_best.m <- spambase_mtry[spambase_mtry[, 2] == min(spambase_mtry[, 2]), 1]
+print(spambase_mtry)
+print(spambase_best.m)
+
+```
+After tuning and taking the best parameters, test comes
+```{r spam rf opt,message=FALSE, error=FALSE}
+
+spambase_rf_optimal_model <-randomForest(X1~.,
+                                         data = spambase_rf_training_data, 
+                                         mtry = spambase_best.m, 
+                                         ntree=500)
+
+print(spambase_rf_optimal_model)
+#Evaluate variable importance
+
+```
+After evaluation , testing comes.
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+```{r spam rf pred,message=FALSE, error=FALSE}
+
+spambase_rf_prediction <- predict(spambase_rf_optimal_model, newdata = spambase_rf_test_data, type = "class")
+spambase_rf_training_prediction <- predict(spambase_rf_optimal_model, newdata = spambase_rf_training_data, type = "class")
+
+spambase_rf_prediction <- as.numeric(spambase_rf_prediction)
+spambase_rf_training_prediction <- as.numeric(spambase_rf_training_prediction)
+
+spambase_rf_test_data$X1 <- as.numeric(spambase_rf_test_data$X1)
+spambase_rf_training_data$X1 <- as.numeric(spambase_rf_training_data$X1)
+
+spambase_rf_table_mat_test  <- table(spambase_rf_test_data$X1, spambase_rf_prediction)
+spambase_rf_training_table_mat_test <- table(spambase_rf_training_data$X1, spambase_rf_training_prediction)
+
+spambase_rf_test  <- confusionMatrix(factor(spambase_rf_prediction), factor(spambase_rf_test_data$X1))
+spambase_rf_training <- confusionMatrix(factor(spambase_rf_training_prediction),factor(spambase_rf_training_data$X1))
+
+data.frame( R2   = R2(spambase_rf_prediction, spambase_rf_test_data$X1),
+            RMSE = RMSE(spambase_rf_prediction, spambase_rf_test_data$X1),
+            MAE  = MAE(spambase_rf_prediction, spambase_rf_test_data$X1),
+            Test_Acc = sum(diag(spambase_rf_training_table_mat_test)) / sum(spambase_rf_training_table_mat_test),
+            Test_Acc = sum(diag(spambase_rf_table_mat_test)) / sum(spambase_rf_table_mat_test))
+
+print(spambase_rf_test[["table"]])
+print(spambase_rf_training[["table"]])
+
+varImp(spambase_rf_optimal_model)
+
+```
+Nearly perfect training score with high test accuracy, again slightly underfit.
+
+---
+
+## 3.4. Lasso Penalty 
+
+* glmnet and cv.glmnet used for the lasso penalty predictions.
+* Target value changed to "yes" and "no" for in built function usage.
+* Model trained and optimized for classification accuracy.
+
+```{r spam lasso penalty regression,message=FALSE, error=FALSE}
+
+spambase_lasso_training_data <- spambase_dt_training_data
+spambase_lasso_test_data <- spambase_dt_test_data
+
+for (i in 1:(nrow(spambase_lasso_training_data))) {
+  
+  if (spambase_lasso_training_data$X1[i] < 1) {
+    
+    spambase_lasso_training_data$X1[i] <- "no"
+    
+  } else {
+    
+    spambase_lasso_training_data$X1[i] <- "yes"
+  }
+}
+
+
+# Make a custom trainControl - use ROC as a model selection criteria
+spambase_control <- trainControl( method = "cv", 
+                                  number = 10,
+                                  summaryFunction = twoClassSummary,
+                                  classProbs = TRUE)
+
+spambase_lasso_model <- train(X1~., 
+                              spambase_lasso_training_data , 
+                              method = "glmnet", 
+                              trControl = spambase_control)
+
+#Check the model
+spambase_lasso_model
+
+plot(spambase_lasso_model)
+
+max(spambase_lasso_model[["results"]]$ROC)
+
+```
+From these results, model will now testing: 
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r spam lasso cont,message=FALSE, error=FALSE}
+
+spambase_lasso_prediction <- predict(spambase_lasso_model, spambase_lasso_test_data, type.measure = "class")
+spambase_lasso_training_prediction <- predict(spambase_lasso_model, spambase_lasso_training_data, type.measure = "class")
+
+spambase_lasso_prediction <- as.numeric(spambase_lasso_prediction)
+spambase_lasso_training_prediction <- as.numeric(spambase_lasso_training_prediction)
+
+spambase_lasso_table_mat <- table(spambase_lasso_test_data$X1, spambase_lasso_prediction)
+spambase_lasso_training_table_mat <- table(spambase_lasso_training_data$X1, spambase_lasso_training_prediction)
+
+spambase_lasso_conf_mat <- confusionMatrix(factor(spambase_lasso_prediction), factor(spambase_rf_test_data$X1))
+spambase_lasso_training_conf_mat <- confusionMatrix(factor(spambase_lasso_training_prediction), factor(spambase_rf_training_data$X1))
+
+
+
+data.frame( R2 = R2(spambase_lasso_prediction, spambase_rf_test_data$X1),
+            RMSE = RMSE(spambase_lasso_prediction, spambase_rf_test_data$X1),
+            MAE  = MAE(spambase_lasso_prediction, spambase_rf_test_data$X1),
+            Training_Accuracy = sum(diag(spambase_lasso_training_table_mat)) / sum(spambase_lasso_training_table_mat),
+            Test_Accuracy = sum(diag(spambase_lasso_table_mat)) / sum(spambase_lasso_table_mat))
+
+print(spambase_lasso_conf_mat[["table"]])
+print(spambase_lasso_conf_mat[["table"]])
+
+varImp(spambase_lasso_model)
+
+
+```
+This time model did not underfit, but scored slightly lower than training which is the must case in order to avoid overfitting.
+
+---
+
+## 3.5.SGD
+
+Again in this block, this followed:
+
+* Test and train data created
+* Model created using xgbTree and tuned via.
+
+```{r spam SGB,message=FALSE, error=FALSE}
+
+library(xgboost)
+
+spambase_sgd_training_data <- spambase_dt_training_data
+spambase_sgd_test_data <- spambase_dt_test_data
+
+spambase_sgd_training_data$X1 <- as.factor(spambase_sgd_training_data$X1)
+spambase_sgd_test_data$X1 <- as.factor(spambase_sgd_test_data$X1)
+
+spambase_sgd_model <- train(X1~.,
+                            data = spambase_sgd_training_data,
+                            method = "xgbTree",
+                            trControl = trainControl("cv", number = 10))
+spambase_sgd_model
+
+spambase_sgd_model$bestTune
+
+```
+
+Moving to testing after tuning:
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r spam sgb prediction and results,message=FALSE, error=FALSE}
+
+spambase_sgd_prediction <- spambase_sgd_model %>% predict(spambase_rf_test_data)
+spambase_sgd_training_prediction <- spambase_sgd_model %>% predict(spambase_rf_training_data)
+
+spambase_sgd_prediction <- as.numeric(spambase_sgd_prediction)
+spambase_sgd_training_prediction <- as.numeric(spambase_sgd_training_prediction)
+
+spambase_sgd_table_mat <- table(spambase_sgd_test_data$X1, spambase_sgd_prediction)
+spambase_sgd_training_table_mat <- table(spambase_sgd_training_data$X1, spambase_sgd_training_prediction)
+
+spambase_sgd_conf_mat <- confusionMatrix(factor(spambase_sgd_prediction), factor(spambase_rf_test_data$X1))
+spambase_sgd_training_conf_mat <- confusionMatrix(factor(spambase_sgd_training_prediction), factor(spambase_rf_training_data$X1))
+
+data.frame( R2 = R2(spambase_sgd_prediction, spambase_rf_test_data$X1),
+            RMSE = RMSE(spambase_sgd_prediction, spambase_rf_test_data$X1),
+            MAE  = MAE(spambase_sgd_prediction, spambase_rf_test_data$X1),
+            Training_Accuracy = sum(diag(spambase_sgd_training_table_mat)) / sum(spambase_sgd_training_table_mat),
+            Test_Accuracy = sum(diag(spambase_sgd_table_mat)) / sum(spambase_sgd_table_mat))
+
+print(spambase_sgd_conf_mat[["table"]])
+print(spambase_sgd_training_conf_mat[["table"]])
+
+varImp(spambase_sgd_model)
+
+```
+
+Nearly perfect training accuracy followed by slightly less testing accuracy is showing that model has learned almost perfectly without overfitting.
+
+# **4.Mice Protein Expression Data Set**
+
+## 4.1.Libraries
+
+Same Libraries will be used for all reports.
+
+## 4.2.Data Import
+
+```{r mice data,message=FALSE, error=FALSE}
+
+mice_data <- readxl::read_xls("Data_Cortex_Nuclear.xls")
+
+# creating a backup dataset for usage purposes, after cleaning missing values, also first column ID will be extracted with genotype, treatment, behavior since they are the main subclasses of the target class
+
+mice_data2 <- na.omit(mice_data)
+
+mice_data2$MouseID <- NULL
+mice_data2$Genotype <- NULL
+mice_data2$Treatment <- NULL
+mice_data2$Behavior <- NULL
+
+# one more backup file for comparison possible comparison
+
+mice_data3 <- mice_data2
+
+# also class will be changed to numeric for handiness
+
+mice_data2$class <- as.numeric(as.factor(mice_data2$class)) 
+
+```
+
+## 4.3.Tree Based Approaches
+
+### 4.3.1.CART
+
+```{r mice decision tree,message=FALSE, error=FALSE}
+# Classification Tree with rpart
+
+## 75% of the sample size
+mice_smp_size <- floor((2/3) * nrow(mice_data2))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+
+mice_train_ind <- sample(seq_len(nrow(mice_data2)), size = mice_smp_size)
+
+mice_dt_training_data <- mice_data2[ mice_train_ind, ]
+mice_dt_test_data <- mice_data2[-mice_train_ind, ]
+
+mice_dt_model <- rpart(class ~ ., 
+                       data = mice_dt_training_data, 
+                       method = "class",
+                       control = rpart.control(minsplit= 1, cp = 0.001))
+
+#Plot Decision Tree
+rpart.plot(mice_dt_model)
+
+# Examine the complexity plot
+printcp(mice_dt_model)
+plotcp(mice_dt_model)
+
+```
+Learning curve is converged very nicely, indicating a good learning. Model optimizing and prediction :
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r mice dt opt,message=FALSE, error=FALSE}
+
+mice_dt_model_opt <- rpart(class ~ ., 
+                           data = mice_dt_training_data, 
+                           method = "class",
+                           control = rpart.control(minsplit= 1, cp = 0.006))
+
+mice_dt_prediction <- predict(mice_dt_model_opt, mice_dt_test_data, type = "class")
+mice_dt_training_prediction <- predict(mice_dt_model_opt, mice_dt_training_data, type = "class")
+
+mice_table_mat <- table(mice_dt_test_data$class, mice_dt_prediction)
+mice_training_table_mat <- table(mice_dt_training_data$class, mice_dt_training_prediction)
+
+mice_dt_conf_mat <- confusionMatrix(factor(mice_dt_prediction), factor(mice_dt_test_data$class))
+mice_dt_training_conf_mat <- confusionMatrix(factor(mice_dt_training_prediction), factor(mice_dt_training_data$class))
+
+mice_dt_prediction <- as.numeric(mice_dt_prediction)
+mice_dt_training_prediction <- as.numeric(mice_dt_training_prediction)
+
+data.frame( R2   = R2(mice_dt_prediction, mice_dt_test_data$class),
+            RMSE = RMSE(mice_dt_prediction, mice_dt_test_data$class),
+            MAE  = MAE(mice_dt_prediction, mice_dt_test_data$class),
+            MAPE = MAPE(mice_dt_prediction, mice_dt_test_data$class),
+            Training_Accuracy = sum(diag(mice_training_table_mat)) / sum(mice_training_table_mat),
+            Test_Accuracy = sum(diag(mice_table_mat)) / sum(mice_table_mat))
+
+print(mice_dt_conf_mat[["table"]])
+print(mice_dt_training_conf_mat[["table"]])
+
+varImp(mice_dt_model_opt)
+
+```
+Some serious underfitting occurred but regardless of a nearly perfect train acc. , testing accuracy is quite high with over %85.
+
+### 4.3.2.Random Forest
+```{r mice random forest, message=FALSE, error=FALSE}
+
+#Random Forest Approach
+
+mice_rf_training_data <- mice_dt_training_data
+mice_rf_test_data <- mice_dt_test_data
+
+
+mice_rf_training_data$class <- as.factor(mice_rf_training_data$class)
+mice_rf_test_data$class <- as.factor(mice_rf_test_data$class)
+
+
+#RF Implement
+
+mice_rf_model <- randomForest(class~.,
+                              data = mice_rf_training_data,
+                              ntree = 500,
+                              method = "class",
+                              search = "grid",
+                              number = 10)
+
+# Print the results
+print(mice_rf_model)
+
+```
+Nearly perfect training, might be overfitted. Will be understand after testing accuracy. Again parameter tuning, selecting the best parameters to optimize the teset accuracy.
+
+```{r mice rf cont,message=FALSE, error=FALSE}
+
+mice_rf_training_data_sub <- subset(mice_rf_training_data, select = -c(class))
+
+floor(sqrt(ncol(mice_rf_training_data) - 1))
+
+mice_mtry <- tuneRF(mice_rf_training_data_sub,
+                    mice_rf_training_data$class, 
+                    ntreeTry = 500,
+                    stepFactor = 2,
+                    improve = 0.03,
+                    trace = TRUE,
+                    plot = TRUE,
+                    importance = TRUE)
+
+mice_best.m <- mice_mtry[mice_mtry[, 2] == min(mice_mtry[, 2]), 1]
+print(mice_mtry)
+print(mice_best.m)
+
+```
+```{r mice rf opt,message=FALSE, error=FALSE}
+
+mice_rf_optimal_model <-randomForest(class~.,
+                                     data = mice_rf_training_data, 
+                                     mtry = mice_best.m, 
+                                     ntree=500)
+
+print(mice_rf_optimal_model)
+#Evaluate variable importance
+
+```
+Model evaluated and can be seen through OOB rate and confusion matrix:
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r mice rf pred,message=FALSE, error=FALSE}
+
+mice_rf_test_prediction <- predict(mice_rf_optimal_model, newdata = mice_rf_test_data, type = "class")
+mice_rf_training_prediction <- predict(mice_rf_optimal_model, newdata = mice_rf_training_data, type = "class")
+
+mice_rf_test_prediction <- as.numeric(mice_rf_test_prediction)
+mice_rf_training_prediction <- as.numeric(mice_rf_training_prediction)
+
+mice_rf_test_data$class <- as.numeric(mice_rf_test_data$class)
+
+mice_rf_table_mat_test  <- table(mice_rf_test_data$class, mice_rf_test_prediction)
+mice_rf_table_mat_training <- table(mice_rf_training_data$class, mice_rf_training_prediction)
+
+#mice_rf_test  <- confusionMatrix(factor(mice_rf_test_prediction), factor(mice_rf_test_data$class))
+#mice_rf_train <- confusionMatrix(factor(predict(mice_rf_optimal_model, mice_rf_training_data, type="class")), factor(mice_rf_training_data$class))
+
+mice_rf_conf_mat_test <- confusionMatrix(factor(mice_rf_test_prediction), factor(mice_rf_test_data$class))
+mice_rf_conf_mat_training <- confusionMatrix(factor(mice_rf_training_prediction), factor(mice_rf_training_data$class))
+
+
+data.frame( R2   = R2(mice_rf_test_prediction, mice_rf_test_data$class),
+            RMSE = RMSE(mice_rf_test_prediction, mice_rf_test_data$class),
+            MAE  = MAE(mice_rf_test_prediction, mice_rf_test_data$class),
+            Training_Acc = sum(diag(mice_rf_table_mat_training)) / sum(mice_rf_table_mat_training),
+            Test_Acc = sum(diag(mice_rf_table_mat_test)) / sum(mice_rf_table_mat_test))
+
+print(mice_rf_conf_mat_training[["table"]])
+print(mice_rf_conf_mat_test[["table"]])
+
+varImp(mice_rf_optimal_model)
+
+```
+Perfect training accuracy with perfect accuracy, which is not overfitting.
+
+## 4.4.Lasso Penalty
+
+* cv.glmnet used with multinomial to classify multiple classes.
+
+```{r mice lasso penalty regression,message=FALSE, error=FALSE}
+library(glmnet)
+
+mice_lasso_training_data <- mice_dt_training_data
+mice_lasso_test_data <- mice_dt_test_data
+
+mice_lasso_model <- cv.glmnet(x = as.matrix(mice_lasso_training_data%>%select(-class)),
+                              y = as.factor(mice_lasso_training_data$class), 
+                              family = "multinomial",
+                              type.measure = c("class"),
+                              nfolds = 5,
+                              alpha = 1) 
+
+#Check the model
+mice_lasso_model
+
+plot(mice_lasso_model)
+
+```
+Error curve converges perfectly  for shown log values :
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r mice lasso pred,message=FALSE, error=FALSE}
+
+mice_lasso_test_prediction <- predict(mice_lasso_model, newx=as.matrix(mice_lasso_test_data%>%select(-class)), s=c("lambda.min"),type="class")[,1]
+mice_lasso_training_prediction <- predict(mice_lasso_model, newx=as.matrix(mice_lasso_training_data%>%select(-class)), s=c("lambda.min"),type="class")[,1]
+
+mice_lasso_training_pred <- as.numeric(mice_lasso_training_prediction)
+mice_lasso_test_prediction <- as.numeric(mice_lasso_test_prediction)
+
+mice_lasso_test_table_mat <- table(mice_lasso_test_data$class, mice_lasso_test_prediction)
+mice_lasso_training_table_mat <- table(mice_lasso_training_data$class, mice_lasso_training_prediction)
+
+mice_lasso_test_conf_mat <- confusionMatrix(factor(mice_lasso_test_prediction), factor(mice_rf_test_data$class))
+mice_lasso_training_conf_mat <- confusionMatrix(factor(mice_lasso_training_prediction), factor(mice_rf_training_data$class))
+
+data.frame( R2 = R2(mice_lasso_test_prediction, mice_rf_test_data$class),
+            RMSE = RMSE(mice_lasso_test_prediction, mice_rf_test_data$class),
+            MAE  = MAE(mice_lasso_test_prediction, mice_rf_test_data$class),
+            Training_Accuracy = sum(diag(mice_lasso_training_table_mat)) / sum(mice_lasso_training_table_mat),
+            Test_Accuracy = sum(diag(mice_lasso_test_table_mat)) / sum(mice_lasso_test_table_mat))
+
+print(mice_lasso_training_conf_mat[["table"]])
+print(mice_lasso_test_conf_mat[["table"]])
+
+```
+
+This time both training and testing score's are perfect. Other result where suspicious but were acceptable since testing accuracy was outscored by training accuracy, but both of them scoring perfect score seems kinda memorization, not learning.
+
+## 4.5.SGB
+
+* xgbTree Used for modelling and the model tuned. 
+
+
+```{r mice SGB,message=FALSE, error=FALSE}
+
+library(xgboost)
+
+mice_sgd_training_data <- mice_dt_training_data
+mice_sgd_test_data <- mice_dt_test_data
+
+mice_sgd_training_data$class <- as.factor(mice_sgd_training_data$class)
+mice_sgd_test_data$class <- as.factor(mice_sgd_test_data$class)
+
+mice_sgd_model <- train(class~.,
+                        data = mice_sgd_training_data,
+                        method = "xgbTree",
+                        trControl = trainControl("cv", number = 10))
+
+mice_sgd_model$bestTune
+
+```
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+
+```{r mice sgb prediction and results,message=FALSE, error=FALSE}
+
+mice_sgd_prediction <- mice_sgd_model %>% predict(mice_rf_test_data)
+mice_sgd_prediction <- as.numeric(mice_sgd_prediction)
+
+mice_sgd_table_mat <- table(mice_sgd_test_data$class, mice_sgd_prediction)
+
+mice_sgd_conf_mat <- confusionMatrix(factor(mice_sgd_prediction), factor(mice_rf_test_data$class))
+
+mice_lasso_test_table_mat <- table(mice_lasso_test_data$class, mice_lasso_test_prediction)
+mice_lasso_training_table_mat <- table(mice_lasso_training_data$class, mice_lasso_training_prediction)
+
+mice_lasso_test_conf_mat <- confusionMatrix(factor(mice_lasso_test_prediction), factor(mice_rf_test_data$class))
+mice_lasso_training_conf_mat <- confusionMatrix(factor(mice_lasso_training_prediction), factor(mice_rf_training_data$class))
+
+data.frame( R2 = R2(mice_lasso_test_prediction, mice_rf_test_data$class),
+            RMSE = RMSE(mice_lasso_test_prediction, mice_rf_test_data$class),
+            MAE  = MAE(mice_lasso_test_prediction, mice_rf_test_data$class),
+            Training_Accuracy = sum(diag(mice_lasso_training_table_mat)) / sum(mice_lasso_training_table_mat),
+            Test_Accuracy = sum(diag(mice_lasso_test_table_mat)) / sum(mice_lasso_test_table_mat))
+
+print(mice_lasso_training_conf_mat[["table"]])
+print(mice_lasso_test_conf_mat[["table"]])
+
+
+```
+Again, both training and testing score's are perfect. Other result where suspicious but were acceptable since testing accuracy was outscored by training accuracy, but both of them scoring perfect score seems kinda memorization, not learning.
+
+# **5.Parkinson Speech Dataset with Multiple Types of Sound Recordings Data Set**
+
+## 5.1.Library
+
+Same Libraries again.
+
+## 5.2.Data
+
+```{r park data handle,message=FALSE, error=FALSE}
+
+park_data <- read.table("train_data.txt", sep =",", header = TRUE)
+
+# subject id will be extract which is the first column, it is not an essential value. Also last column, which is the class output will be extracted because we want to obtain the UPDRS value by regression, we do not want to categorize the instances 
+park_data$X1 <- NULL
+park_data$X1.1<- NULL 
+
+# changing the name of the target column name to UPDRS for usage purposes
+
+park_data <- park_data %>% rename( UPDRS = X23)
+
+# creating a backup dataset for usage purposes, after cleaning missing values 
+park_data <- na.omit(park_data)
+park_data2 <- park_data
+
+```
+
+## 5.3.Tree Based Approaches
+
+### 5.3.1.CART
+
+* rpart used for modelling with anova since it is a regression problem.
+
+```{r park decision tree,message=FALSE, error=FALSE}
+# Classification Tree with rpart
+
+## 75% of the sample size
+park_smp_size <- floor((2/3) * nrow(park_data2))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+
+park_train_ind <- sample(seq_len(nrow(park_data2)), size = park_smp_size)
+
+park_dt_training_data <- park_data2[park_train_ind, ]
+park_dt_test_data     <- park_data2[-park_train_ind, ]
+
+
+park_dt_model <- rpart(UPDRS~., 
+                       data = park_dt_training_data, 
+                       cp = 0.02,
+                       method = "anova")
+
+
+#Plot Decision Tree
+rpart.plot(park_dt_model)
+
+# Examine the complexity plot
+printcp(park_dt_model)
+plotcp(park_dt_model)
+
+```
+From how the relative error graph seems like, model is not learning properly. Parameter optimizing with:
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and MAPE score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r park dt model,message=FALSE, error=FALSE}
+
+park_dt_model_opt <- rpart(UPDRS ~ ., 
+                           data = park_dt_training_data, 
+                           method="anova",
+                           control = rpart.control(minsplit= 5, cp = 0.04))
+
+park_dt_prediction <- predict(park_dt_model_opt, newdata = park_dt_test_data)
+park_dt_training_pred <- predict(park_dt_model_opt, newdata = park_dt_training_data)
+
+data.frame( R2   = R2(park_dt_prediction, park_dt_test_data$UPDRS),
+            RMSE = RMSE(park_dt_prediction, park_dt_test_data$UPDRS),
+            MAE  = MAE(park_dt_prediction, park_dt_test_data$UPDRS),
+            MAPE_train = MAPE(park_dt_training_pred, park_dt_training_data$UPDRS),
+            MAPE_test = MAPE(park_dt_prediction, park_dt_test_data$UPDRS))
+
+varImp(park_dt_model_opt)
+
+```
+### 5.3.2.Random Forest
+
+Modelling and parameter optimizing.
+```{r park random forest, message=FALSE, error=FALSE}
+
+#Random Forest Approach
+
+
+park_rf_training_data <- park_dt_training_data
+park_rf_test_data <- park_dt_test_data
+
+
+#park_rf_training_data$UPDRS <- as.factor(park_rf_training_data$UPDRS)
+#park_rf_test_data$UPDRS <- as.factor(park_rf_test_data$UPDRS)
+
+#RF Implement
+park_rf_model <- randomForest(UPDRS~.,
+                              data = park_rf_training_data,
+                              ntree = 500,
+                              repeats = 1,
+                              number = 10,
+                              importance = TRUE, 
+                              na.action = na.omit)
+
+
+# Print the results
+print(park_rf_model)
+
+
+```
+
+```{r park rf cont,message=FALSE, error=FALSE}
+
+park_rf_training_data_sub <- subset(park_rf_training_data, select = -c(UPDRS))
+
+floor(sqrt(ncol(park_rf_training_data) - 1))
+
+park_mtry <- tuneRF(park_rf_training_data_sub,
+                        park_rf_training_data$UPDRS, 
+                        ntreeTry = 500,
+                        stepFactor = 2,
+                        repeats = 1, 
+                        improve = 0.01,
+                        trace = TRUE,
+                        plot = TRUE,
+                        importance = TRUE)
+
+park_best.m <- park_mtry[park_mtry[, 2] == min(park_mtry[, 2]), 1]
+print(park_mtry)
+print(park_best.m)
+
+```
+```{r park rf opt,message=FALSE, error=FALSE}
+
+park_rf_model_opt <-randomForest(UPDRS~.,
+                                 data = park_rf_training_data, 
+                                 mtry = park_best.m, 
+                                 ntree=500)
+
+print(park_rf_model_opt)
+#Evaluate variable importance
+
+```
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and MAPE score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r park rf pred,message=FALSE, error=FALSE}
+
+park_rf_prediction <- predict(park_rf_model_opt, newdata = park_rf_test_data)
+
+park_rf_training_pred <- predict(park_rf_model_opt, newdata = park_rf_training_data)
+
+data.frame( R2   = R2(park_rf_prediction, park_rf_test_data$UPDRS),
+            RMSE = RMSE(park_rf_prediction, park_rf_test_data$UPDRS),
+            MAE  = MAE(park_rf_prediction, park_rf_test_data$UPDRS),
+            MAPE_train = MAPE(park_rf_training_pred, park_rf_training_data$UPDRS),
+            MAPE_test = MAPE(park_rf_prediction, park_rf_test_data$UPDRS))
+
+varImp(park_rf_model_opt)
+
+```
+Again underfitting as the training accuracy outscoring test accuracy.
+
+
+## 5.4.Lasso Penalty
+
+* cv.glmnet used with gaussian familty, using mse metric to optimize the accuracy.
+
+```{r park lasso penalty regression,message=FALSE, error=FALSE}
+
+library(glmnet)
+
+park_lasso_training_data <- park_dt_training_data
+park_lasso_test_data <- park_dt_test_data
+
+# Setting alpha = 1 implements lasso regression
+park_lasso_model <- cv.glmnet(x = as.matrix(park_lasso_training_data%>%select(-UPDRS)),
+                              y = park_lasso_training_data$UPDRS, 
+                              family = "gaussian",
+                              type.measure = "mse",
+                              nfolds = 10,
+                              alpha = 1) 
+
+# Best 
+park_lambda_best <- park_lasso_model$lambda.min 
+park_lambda_best
+
+#Check the model
+park_lasso_model
+
+plot(park_lasso_model)
+
+max(park_lasso_model[["results"]]$ROC)
+
+```
+Some converging can be seen: 
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and MAPE score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r park lasso pred,message=FALSE, error=FALSE}
+
+park_lasso_prediction <- predict(park_lasso_model, newx=as.matrix(park_lasso_test_data%>%select(-UPDRS)), s=c("lambda.min"),type="response")[,1]
+
+park_lasso_training_pred <- predict(park_lasso_model, newx=as.matrix(park_lasso_training_data%>%select(-UPDRS)), s=c("lambda.min"),type="response")[,1]
+
+data.frame( R2 = R2(park_lasso_prediction, park_rf_test_data$UPDRS),
+            RMSE = RMSE(park_lasso_prediction, park_rf_test_data$UPDRS),
+            MAE  = MAE(park_lasso_prediction, park_rf_test_data$UPDRS),
+            MAPE_train = MAPE(park_lasso_training_pred, park_rf_training_data$UPDRS),
+            MAPE_test = MAPE(park_lasso_prediction, park_rf_test_data$UPDRS))
+
+
+
+
+```
+This is not underfitting but it also showed worse scores than the forest algorithms.
+
+## 5.5.SGB
+
+* xgboost used for modelling and tuning
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and MAPE score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r park SGB,message=FALSE, error=FALSE}
+
+library(xgboost)
+
+park_sgb_training_data <- park_dt_training_data
+park_sgb_test_data <- park_dt_test_data
+
+park_sgb_training_x = as.matrix(park_sgb_training_data%>%select(-UPDRS))
+park_sgb_training_y = park_sgb_training_data$UPDRS
+
+park_sgb_test_x = as.matrix(park_sgb_test_data%>%select(-UPDRS))
+park_sgb_test_y = park_sgb_test_data$UPDRS
+
+park_sgb_model_train = xgb.DMatrix(data = park_sgb_training_x, label = park_sgb_training_y)
+park_sgb_model_test   = xgb.DMatrix(data = park_sgb_test_x, label = park_sgb_test_y)
+
+park_sgb_model <- xgboost(data = park_sgb_model_train, max.depth = 2, nrounds = 50)
+
+park_sgb_training_prediction = predict(park_sgb_model, park_sgb_model_train)
+park_sgb_test_prediction = predict(park_sgb_model, park_sgb_model_test)
+
+
+data.frame( R2 = R2(park_sgb_test_prediction, park_rf_test_data$UPDRS),
+            RMSE = RMSE(park_sgb_test_prediction, park_rf_test_data$UPDRS),
+            MAE  = MAE(park_sgb_test_prediction, park_rf_test_data$UPDRS),
+            MAPE_train = MAPE(park_sgb_training_prediction, park_rf_training_data$UPDRS),
+            MAPE_test = MAPE(park_sgb_test_prediction, park_rf_test_data$UPDRS))
+
+```
+This is the best one in this report in this dataset's report.
+
+
+# **6.Portugues Class Student Performance Data Set**
+
+## 6.1.Library
+
+Same as previous ones.
+
+## 6.2.Data
+
+Data importing and handling, letter grades are assigned to letter column for grading of pass and fail.
+
+```{r stu lib data,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_data_por <- read_csv2("student-por.csv")
+
+# removing NA 
+stu_data_por <- na.omit(stu_data_por)
+
+# creating a backup dataset for usage purposes
+stu_data_graded <- stu_data_por
+
+for (i in 1:(nrow(stu_data_graded))) {
+  
+  if (stu_data_graded$G3[i] < 10) {
+    
+    stu_data_graded$letter[i] <- 1
+    
+  } else {
+    
+    stu_data_graded$letter[i] <- 2
+  }
+}
+
+```
+
+## 6.3.Tree Based Approaches
+
+### 6.3.1.Cart
+
+G1,2 and G3 are the scores child's get in each semester, so they're directly correlated to pass and fail. A classification without these instances are needed.
+
+* rpart used for modelling
+
+```{r stu decision tree,message=FALSE, error=FALSE, warning=FALSE}
+# Classification Tree with rpart
+library(rpart)
+
+
+stu_data_graded$G1 <- NULL
+stu_data_graded$G2 <- NULL
+stu_data_graded$G3 <- NULL
+
+## 75% of the sample size
+stu_smp_size <- floor((2/3) * nrow(stu_data_graded))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+stu_train_ind <- sample(seq_len(nrow(stu_data_graded)), size = stu_smp_size)
+
+stu_training_dat <- stu_data_graded[stu_train_ind, ]
+stu_test_dat <- stu_data_graded[-stu_train_ind, ]
+
+
+stu_dt_model <- rpart(letter ~ ., 
+                      data = stu_training_dat, 
+                      method="class",
+                      control = rpart.control(minsplit= 1, cp = 0.001))
+
+
+#Plot Decision Tree
+rpart.plot(stu_dt_model)
+
+# Examine the complexity plot
+printcp(stu_dt_model)
+plotcp(stu_dt_model)
+
+```
+Cross validation curve is looking like that the model might not properly learning. Tuning parameters with cp:
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r stu dt prediction,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_dt_model <- rpart(letter ~ ., 
+                      data = stu_training_dat, 
+                      method ="class",
+                      control = rpart.control(minsplit= 1, cp = 0.0150))
+
+stu_prediction <- predict(stu_dt_model, stu_test_dat, type = "class")
+stu_training_prediction <- predict(stu_dt_model, stu_training_dat, type = "class")
+
+stu_prediction <- as.numeric(stu_prediction)
+stu_training_prediction <- as.numeric(stu_training_prediction)
+
+stu_table_mat <- table(stu_test_dat$letter, stu_prediction)
+stu_training_table_mat <- table(stu_training_dat$letter, stu_training_prediction)
+
+stu_dt_conf_mat <- confusionMatrix(factor(stu_prediction), factor(stu_test_dat$letter))
+stu_dt_training_conf_mat <- confusionMatrix(factor(stu_training_prediction), factor(stu_training_dat$letter))
+
+data.frame( R2 = R2(stu_prediction, stu_test_dat$letter),
+            RMSE = RMSE(stu_prediction, stu_test_dat$letter),
+            MAE  = MAE(stu_prediction, stu_test_dat$letter),
+            Training_Accuracy = sum(diag(stu_training_table_mat)) / sum(stu_training_table_mat),
+            Test_Accuracy = sum(diag(stu_table_mat)) / sum(stu_table_mat))
+
+print(stu_dt_training_conf_mat[["table"]])
+print(stu_dt_conf_mat[["table"]])
+
+varImp(stu_dt_model)
+
+```
+Model is highly overfitted, but still scores a decent score. After looking to confusion matrix, there are some serious false negative cases, this might be caused by class imbalance.
+
+### 6.3.2.Random Forest
+
+* Model creation and parameter tuning.
+
+```{r stu random forest, message=FALSE, error=FALSE, warning=FALSE}
+
+#Random Forest Approach
+
+
+stu_rf_training_data <- stu_training_dat
+stu_rf_test_data <- stu_test_dat
+
+
+stu_rf_training_data$letter <- as.factor(stu_rf_training_data$letter)
+stu_rf_test_data$letter <- as.factor(stu_rf_test_data$letter)
+
+
+stu_rf_model <- randomForest(letter~.,
+                             data = stu_rf_training_data,
+                             ntree = 500,
+                             search = "grid",
+                             number = 10)
+
+
+# Print the results
+print(stu_rf_model)
+
+
+```
+Parameter tuning cont.
+
+```{r stu rf cont,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_rf_training_data_sub <- subset(stu_rf_training_data, select = -c(letter))
+
+floor(sqrt(ncol(stu_rf_training_data) - 1))
+
+stu_mtry <- tuneRF(stu_rf_training_data_sub,
+               stu_rf_training_data$letter, 
+               ntreeTry = 1000,
+               stepFactor = 1.5,
+               improve = 0.01,
+               trace = TRUE,
+               plot = TRUE,
+               importance = TRUE)
+
+stu_best.m <- stu_mtry[stu_mtry[, 2] == min(stu_mtry[, 2]), 1]
+print(stu_mtry)
+print(stu_best.m)
+
+```
+OOB plot showes the optimal parameter for the optimum model. 
+
+```{r stu rf_opt ,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_rf_optimal_model <-randomForest(letter~.,
+                                    data = stu_rf_training_data, 
+                                    mtry = stu_best.m, 
+                                    ntree=500)
+
+print(stu_rf_optimal_model)
+#Evaluate variable importance
+
+```
+There are issues on first class identification at train. 1's are fail where 2's are pass. Class imbalance between 1 and 2's are very high. This might causing the model to misclassification.
+
+After evaluating the new model:
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r stu rf pred,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_rf_prediction <- predict(stu_rf_optimal_model, newdata = stu_rf_test_data, type = "class")
+stu_rf_training_prediction <- predict(stu_rf_optimal_model, newdata = stu_rf_training_data, type = "class")
+
+stu_rf_prediction <- as.numeric(stu_rf_prediction)
+stu_rf_training_prediction <- as.numeric(stu_rf_training_prediction)
+
+stu_rf_test_data$letter <- as.numeric(stu_rf_test_data$letter)
+stu_rf_training_data$letter <- as.numeric(stu_rf_training_data$letter)
+
+stu_rf_table_mat_test  <- table(stu_rf_test_data$letter, stu_rf_prediction)
+stu_rf_table_training_mat_test  <- table(stu_rf_training_data$letter, stu_rf_training_prediction)
+
+stu_rf_test  <- confusionMatrix(factor(stu_rf_prediction), factor(stu_rf_test_data$letter))
+stu_rf_training  <- confusionMatrix(factor(stu_rf_training_prediction), factor(stu_rf_training_data$letter))
+
+stu_rf_conf_mat <- confusionMatrix(factor(stu_rf_prediction), factor(stu_rf_test_data$letter))
+stu_rf_training_conf_mat <- confusionMatrix(factor(stu_rf_training_prediction), factor(stu_rf_training_data$letter))
+
+data.frame( R2   = R2(stu_rf_prediction, stu_rf_test_data$letter),
+            RMSE = RMSE(stu_rf_prediction, stu_rf_test_data$letter),
+            MAE  = MAE(stu_rf_prediction, stu_rf_test_data$letter),
+            Training_Acc = sum(diag(stu_rf_table_training_mat_test)) / sum(stu_rf_table_training_mat_test),
+            Test_Acc = sum(diag(stu_rf_table_mat_test)) / sum(stu_rf_table_mat_test))
+
+print(stu_rf_training_conf_mat[["table"]])
+print(stu_rf_conf_mat[["table"]])
+
+varImp(stu_rf_optimal_model)
+
+
+
+```
+Very very serious overfitting. This type of approaches are called greedy approaches because of their instability and likeliness of overfitting. Again as said on previous blocks, some very serious prediction on the first class, nearly all of them are wrong (class imbalance with the insufficient instance is the reason).
+
+## 6.4.Lasso Penalty
+
+* Converting grades to "pass" and "fail" for between 10-20 and 0-9 grade range.
+* glmnet used for modelling.
+
+
+```{r stu lasso penalty regression,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_lasso_training_data <- stu_training_dat
+stu_lasso_test_data <- stu_test_dat
+
+for (i in 1:(nrow(stu_lasso_training_data))) {
+  
+  if (stu_lasso_training_data$letter[i] < 10) {
+    
+    stu_lasso_training_data$letter[i] <- "F"
+    
+  } else {
+    
+    stu_lasso_training_data$letter[i] <- "P"
+  }
+}
+
+for (i in 1:(nrow(stu_lasso_test_data))) {
+  
+  if (stu_lasso_test_data$letter[i] < 10) {
+    
+    stu_lasso_test_data$letter[i] <- "F"
+    
+  } else {
+    
+    stu_lasso_test_data$letter[i] <- "P"
+  }
+}
+
+
+# Make a custom trainControl - use ROC as a model selection criteria
+stu_control <- trainControl( method = "cv", 
+                             number = 10,
+                             summaryFunction = twoClassSummary,
+                             classProbs = TRUE)
+
+stu_lasso_model <- train(letter~., 
+                         stu_lasso_training_data , 
+                         method = "glmnet", 
+                         trControl = stu_control)
+
+#Check the model
+stu_lasso_model
+
+plot(stu_lasso_model)
+
+max(stu_lasso_model[["results"]]$ROC)
+
+```
+This time errors' and regularization shows a stabile, learning model. After parameter tuning:
+
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r stu lasso pred,message=FALSE, error=FALSE, warning=FALSE}
+
+stu_lasso_prediction <- predict(stu_lasso_model, stu_lasso_test_data, type.measure = "class")
+stu_lasso_training_prediction <- predict(stu_lasso_model, stu_lasso_training_data, type.measure = "class")
+
+stu_lasso_prediction <- as.numeric(stu_lasso_prediction)
+stu_lasso_training_prediction <- as.numeric(stu_lasso_training_prediction)
+
+stu_lasso_table_mat <- table(stu_test_dat$letter, stu_lasso_prediction)
+stu_lasso_training_table_mat <- table(stu_training_dat$letter, stu_lasso_training_prediction)
+
+stu_lasso_conf_mat <- confusionMatrix(factor(stu_lasso_prediction), factor(stu_test_dat$letter))
+stu_lasso_training_conf_mat <- confusionMatrix(factor(stu_lasso_training_prediction), factor(stu_training_dat$letter))
+
+data.frame( R2 = R2(stu_lasso_prediction, stu_test_dat$letter),
+            RMSE = RMSE(stu_lasso_prediction, stu_test_dat$letter),
+            MAE  = MAE(stu_lasso_prediction, stu_test_dat$letter),
+            Test_Accuracy = sum(diag(stu_lasso_training_table_mat)) / sum(stu_lasso_training_table_mat),
+            Test_Accuracy = sum(diag(stu_lasso_table_mat)) / sum(stu_lasso_table_mat))
+
+print(stu_lasso_training_conf_mat[["table"]])
+print(stu_lasso_conf_mat[["table"]])
+
+varImp(stu_lasso_model)
+
+```
+F1 scores show decent accuracy of the model by the prediction but looking to the confusion matrix, misclassification is so higher again, class imbalance.
+
+## 6.5.SGB
+
+* xgbTree used for modelling and parameter tuning
+
+```{r stu SGB,message=FALSE, error=FALSE, warning=FALSE, warning=FALSE}
+
+library(xgboost)
+
+stu_sgd_training_data <- stu_training_dat
+stu_sgd_test_data <- stu_test_dat
+
+stu_sgd_training_data$letter <- as.factor(stu_sgd_training_data$letter)
+stu_sgd_test_data$letter <- as.factor(stu_sgd_test_data$letter)
+
+stu_sgd_model <- train(letter~.,
+                       data = stu_sgd_training_data,
+                       method = "xgbTree",
+                       trControl = trainControl("cv", number = 10))
+
+stu_sgd_model$bestTune
+
+
+```
+* Confusion matrix is created for training and testing results (and showed in this order). It simply shows true positives, true negatives, false positives and false negatives.
+* R2, RMSE, MAE and F1 score (for both train and test) accuracy metrics are printed in the output.
+* Model information and the variances shared by instances printed.
+
+```{r sgb pred,message=FALSE, error=FALSE, warning=FALSE, warning=FALSE}
+
+stu_sgd_prediction <- stu_sgd_model %>% predict(stu_sgd_test_data)
+stu_sgd_training_prediction <- stu_sgd_model %>% predict(stu_sgd_training_data)
+
+stu_sgd_prediction <- as.numeric(stu_sgd_prediction)
+stu_sgd_training_prediction <- as.numeric(stu_sgd_training_prediction)
+
+stu_sgd_table_mat <- table(stu_sgd_test_data$letter, stu_sgd_prediction)
+stu_sgd_training_table_mat <- table(stu_sgd_training_data$letter, stu_sgd_training_prediction)
+
+stu_sgd_conf_mat <- confusionMatrix(factor(stu_sgd_prediction), factor(stu_rf_test_data$letter))
+stu_sgd_training_conf_mat <- confusionMatrix(factor(stu_sgd_training_prediction), factor(stu_rf_training_data$letter))
+
+data.frame( R2 = R2(stu_sgd_prediction, stu_rf_test_data$letter),
+            RMSE = RMSE(stu_sgd_prediction, stu_rf_test_data$letter),
+            MAE  = MAE(stu_sgd_prediction, stu_rf_test_data$letter),
+            Training_Accuracy = sum(diag(stu_sgd_training_table_mat)) / sum(stu_sgd_training_table_mat),
+            Test_Accuracy = sum(diag(stu_sgd_table_mat)) / sum(stu_sgd_table_mat))
+
+print(stu_sgd_training_conf_mat[["table"]])
+print(stu_sgd_conf_mat[["table"]])
+
+varImp(stu_sgd_model)
+
+```
+Again, overfitting with terrible classification on the less available data feature, fail. 
+
+## 7.Results and Discussion
+
+From the evaluated results in overall:
+
+* Accept for the last data set (student performance), sgb take the lead in terms of accuracy. While it shows some clear overfitting, maybe a drop out could be a band-aid for this issue.
+* When data is properly structured with lots of instances, random forest seams like the second most preferable one since it showed that no matter linear or non-linear the data is, it can fit a nice prediction considering we did not prune it or post processed anything. On the other hand CART, a single tree seems like it suffers from the increase number of attributes since there are so many feature to integrate into.
+* All methods showed proper MAPE results which indicates that all methods can be used for: 
+  * Binary Classification
+  * Multi Class Classification
+  * Regression
+
+## 8.Summary
+
+* SGB and Random Forest performs better with more stabile, more accurate results.
+* Fitting degrees(accept the highlighted underfit and overfit ones) are seems plausible.
+* Class imbalance seems to affect the prediction too much when there are a little attribute, but it might also be caused from the quality of the data provided, I did not do one-hot encoding other than the package usage inside the in built model creator functions.
+* In the overall, all methods tend to give not-so-much different results, indicating a good model creation.
+
